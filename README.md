@@ -27,7 +27,7 @@
 Docker Desktop 要先启动。
 
 ```bash
-./build.sh          # 构建，默认跟随本机架构(arm64)
+./build.sh          # 构建，不传 platform 时跟随构建机架构
 ./run.sh            # 起容器，宿主 ./data 挂到容器 /data
 ```
 
@@ -55,17 +55,18 @@ HOST_DATA_DIR=/some/other/dir docker compose run --rm pytools
 
 容器里统一从 `/data` 访问（脚本里可用环境变量 `$DATA_DIR`）。想挂多个目录，在 `run.sh` 里再加一行 `-v 宿主路径:容器路径`。
 
-## 服务器上出 x86 镜像
+## 架构 / 交叉构建
 
-Dockerfile 里 `FROM --platform=$TARGETPLATFORM`，平台跟着构建参数走：
+`build.sh` 和 `run.sh` 都**不写死 platform**，跟随构建机架构 —— 本机 M 芯片出 arm64，x86 服务器出 amd64，两边都不用管。Dockerfile 的 `FROM` 也不带 `--platform`。
+
+只有在 A 机器上出 B 架构的镜像时才需要显式指定：
 
 ```bash
-TARGET_PLATFORM=linux/amd64 ./build.sh
-
-# 或者
-docker build --platform linux/amd64 -t pytools:3.12 .
-TARGET_PLATFORM=linux/amd64 docker compose build
+TARGET_PLATFORM=linux/amd64 ./build.sh     # 在 arm64 Mac 上出 x86 镜像
+TARGET_PLATFORM=linux/arm64 ./run.sh       # 用 Rosetta 跑 arm64 镜像（反之亦然）
 ```
+
+`TARGET_PLATFORM` 只用来交叉构建，别拿它当"目标环境标记"。写死一个默认值的话，在架构不一致的机器上 `run.sh` 会匹配不到本地镜像，转而去 registry 拉，表现就是卡在 `Unable to find image ... locally`。
 
 导出后推到服务器：
 
@@ -171,8 +172,8 @@ k3s 用 containerd 而不是 docker daemon，`docker build`/`docker load` 出来
 ### 步骤
 
 ```bash
-# 1. 本机构建并导出（服务器是 x86 就带上 TARGET_PLATFORM）
-TARGET_PLATFORM=linux/amd64 ./build.sh
+# 1. 本机构建并导出（本机是什么架构就出什么，需要交叉才加 TARGET_PLATFORM）
+./build.sh
 docker save pytools:3.12 -o pytools-3.12.tar
 
 # 2. 传到节点

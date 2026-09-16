@@ -16,8 +16,9 @@ services:
         JMETER_PLUGINS_MANAGER: ${JMETER_PLUGINS_MANAGER:-}
     image: pytools:3.12
     container_name: pytools
-    # 本机默认 arm64；服务器上：TARGET_PLATFORM=linux/amd64 docker compose build
-    platform: ${TARGET_PLATFORM:-linux/arm64}
+    # 故意不写 platform：写了会强制按那个架构找镜像，架构不一致的机器上
+    # 会匹配不到本地镜像、转而去 registry 拉。交叉构建才需要，那时加回：
+    #   platform: ${TARGET_PLATFORM:-linux/amd64}
     working_dir: /work
     volumes:
       # 宿主目录 → 容器 /data，用 HOST_DATA_DIR 覆盖
