@@ -3,12 +3,21 @@
 # 服务器上出 x86 镜像只需 docker build --platform linux/amd64 ...
 FROM  python:3.12-slim-bookworm
 
-# 国内构建可覆盖：
-#   --build-arg PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
-#   --build-arg DEBIAN_MIRROR=mirrors.tuna.tsinghua.edu.cn
+# 下载全部默认走国内镜像（apt 阿里云 / pip 清华 / JMeter 清华 / maven 阿里云）。
+# 每个源都能单独覆盖回官方地址，出国构建时用：
+#   --build-arg APT_MIRROR=deb.debian.org
+#   --build-arg PIP_INDEX_URL=https://pypi.org/simple
+#   --build-arg JMETER_MIRROR=https://dlcdn.apache.org/jmeter/binaries
+#   --build-arg MAVEN_MIRROR=https://repo1.maven.org/maven2
 # 注意：显式传空值会覆盖默认值，所以下面这些都在 RUN 里做了兜底，空 = 用默认。
+ARG APT_MIRROR=
 ARG PIP_INDEX_URL=
-ARG DEBIAN_MIRROR=
+ARG JMETER_MIRROR=
+ARG MAVEN_MIRROR=
+# mc / awscli 没有公开的国内镜像，默认走官方；
+# 公司内网有 Nexus/Artifactory 代理的话可以用这两个指过去。
+ARG MC_MIRROR=
+ARG AWS_MIRROR=
 ARG JMETER_VERSION=
 ARG JMETER_PLUGINS_MANAGER=
 
@@ -24,10 +33,10 @@ WORKDIR /work
 
 # ---------- 系统工具 ----------
 RUN set -eux; \
-    if [ -n "$DEBIAN_MIRROR" ]; then \
-        sed -i "s|deb.debian.org|$DEBIAN_MIRROR|g" \
-            /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list 2>/dev/null || true; \
-    fi; \
+    APT_MIRROR="${APT_MIRROR:-mirrors.aliyun.com}"; \
+    for f in /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list; do \
+        if [ -f "$f" ]; then sed -i "s|deb.debian.org|$APT_MIRROR|g" "$f"; fi; \
+    done; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         bash bash-completion ca-certificates curl wget \
@@ -53,7 +62,7 @@ RUN set -eux; \
         aarch64) MC_ARCH=arm64 ;; \
         *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;; \
     esac; \
-    curl -fsSL "https://dl.min.io/client/mc/release/linux-${MC_ARCH}/mc" -o /usr/local/bin/mc; \
+    curl -fsSL "${MC_MIRROR:-https://dl.min.io/client/mc/release}/linux-${MC_ARCH}/mc" -o /usr/local/bin/mc; \
     chmod +x /usr/local/bin/mc
 
 # ---------- AWS CLI v2 ----------
@@ -63,7 +72,7 @@ RUN set -eux; \
         aarch64) AWS_ARCH=aarch64 ;; \
         *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;; \
     esac; \
-    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${AWS_ARCH}.zip" -o /tmp/awscliv2.zip; \
+    curl -fsSL "${AWS_MIRROR:-https://awscli.amazonaws.com}/awscli-exe-linux-${AWS_ARCH}.zip" -o /tmp/awscliv2.zip; \
     unzip -q /tmp/awscliv2.zip -d /tmp; \
     /tmp/aws/install; \
     rm -rf /tmp/awscliv2.zip /tmp/aws
@@ -79,18 +88,31 @@ ENV JMETER_HOME=/opt/jmeter \
 RUN set -eux; \
     JMETER_VER="${JMETER_VERSION:-5.6.3}"; \
     PM_VER="${JMETER_PLUGINS_MANAGER:-2.0}"; \
+    JMETER_BASE="${JMETER_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/apache/jmeter/binaries}"; \
+    MAVEN_BASE="${MAVEN_MIRROR:-https://maven.aliyun.com/repository/public}"; \
     cd /tmp; \
-    curl -fsSL -o jmeter.tgz "https://dlcdn.apache.org/jmeter/binaries/apache-jmeter-${JMETER_VER}.tgz" \
-      || curl -fsSL -o jmeter.tgz "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-${JMETER_VER}.tgz"; \
-    curl -fsSL -o jmeter.tgz.sha512 "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-${JMETER_VER}.tgz.sha512"; \
+    for base in "$JMETER_BASE" \
+                "https://dlcdn.apache.org/jmeter/binaries" \
+                "https://archive.apache.org/dist/jmeter/binaries"; do \
+        if curl -fsSL -o jmeter.tgz "$base/apache-jmeter-${JMETER_VER}.tgz"; then \
+            echo ">>> JMeter tgz 来自 $base"; break; \
+        fi; \
+    done; \
+    test -s jmeter.tgz || { echo "JMeter 下载失败：所有源都不可用" >&2; exit 1; }; \
+    curl -fsSL -o jmeter.tgz.sha512 \
+        "https://archive.apache.org/dist/jmeter/binaries/apache-jmeter-${JMETER_VER}.tgz.sha512"; \
     sed -i "s|apache-jmeter-${JMETER_VER}.tgz|jmeter.tgz|" jmeter.tgz.sha512; \
     sha512sum -c jmeter.tgz.sha512; \
     mkdir -p "$JMETER_HOME"; \
     tar -xzf jmeter.tgz --strip-components=1 -C "$JMETER_HOME"; \
     rm -f jmeter.tgz jmeter.tgz.sha512; \
     curl -fsSL -o "$JMETER_HOME/lib/cmdrunner-2.3.jar" \
+        "$MAVEN_BASE/kg/apc/cmdrunner/2.3/cmdrunner-2.3.jar" \
+      || curl -fsSL -o "$JMETER_HOME/lib/cmdrunner-2.3.jar" \
         "https://repo1.maven.org/maven2/kg/apc/cmdrunner/2.3/cmdrunner-2.3.jar"; \
     curl -fsSL -o "$JMETER_HOME/lib/ext/jmeter-plugins-manager-${PM_VER}.jar" \
+        "$MAVEN_BASE/kg/apc/jmeter-plugins-manager/${PM_VER}/jmeter-plugins-manager-${PM_VER}.jar" \
+      || curl -fsSL -o "$JMETER_HOME/lib/ext/jmeter-plugins-manager-${PM_VER}.jar" \
         "https://repo1.maven.org/maven2/kg/apc/jmeter-plugins-manager/${PM_VER}/jmeter-plugins-manager-${PM_VER}.jar"; \
     unzip -p "$JMETER_HOME/lib/ext/jmeter-plugins-manager-${PM_VER}.jar" \
         org/jmeterplugins/repository/PluginsManagerCMD.sh > "$JMETER_HOME/bin/PluginsManagerCMD.sh"; \
@@ -102,7 +124,11 @@ COPY requirements.txt /tmp/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     set -eux; \
     PIP_OPTS=""; \
-    if [ -n "${PIP_INDEX_URL:-}" ]; then PIP_OPTS="-i $PIP_INDEX_URL"; fi; \
+    if [ -n "${PIP_INDEX_URL:-}" ]; then \
+        PIP_OPTS="-i $PIP_INDEX_URL"; \
+    else \
+        PIP_OPTS="-i https://pypi.tuna.tsinghua.edu.cn/simple"; \
+    fi; \
     pip install $PIP_OPTS -r /tmp/requirements.txt
 
 # ---------- 版本自检（构建时失败好过运行时才发现） ----------

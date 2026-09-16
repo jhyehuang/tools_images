@@ -75,13 +75,37 @@ docker save pytools:3.12 | gzip > pytools-3.12-amd64.tar.gz
 gunzip -c pytools-3.12-amd64.tar.gz | docker load
 ```
 
-## 国内构建加速
+## 下载源 / 国内加速
+
+**镜像层**（`FROM python:3.12-slim-bookworm`）靠 Docker 的 registry mirror 加速，Docker Desktop 里配 `https://docker.m.daocloud.io/` 即可，跟 Dockerfile 无关。
+
+**镜像内部的下载**走的是普通 HTTP，不受 registry mirror 影响，所以 Dockerfile 里默认全部换成了国内源：
+
+| 内容 | 默认源 |
+| --- | --- |
+| apt 包 | `mirrors.aliyun.com` |
+| pip 包 | `pypi.tuna.tsinghua.edu.cn` |
+| JMeter tgz (87MB) | `mirrors.tuna.tsinghua.edu.cn/apache` |
+| maven jar | `maven.aliyun.com/repository/public` |
+| mc | `dl.min.io`（无公开国内镜像） |
+| awscli | `awscli.amazonaws.com`（无公开国内镜像） |
+
+不用额外设置，直接 `./build.sh` 就是快的。要换回官方源（比如在国外构建）：
 
 ```bash
-PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
-DEBIAN_MIRROR=mirrors.tuna.tsinghua.edu.cn \
+APT_MIRROR=deb.debian.org \
+PIP_INDEX_URL=https://pypi.org/simple \
+JMETER_MIRROR=https://dlcdn.apache.org/jmeter/binaries \
+MAVEN_MIRROR=https://repo1.maven.org/maven2 \
 ./build.sh
 ```
+
+`mc` 和 `awscli` 没有公开的国内镜像。如果公司内网有 Nexus/Artifactory 代理，用 `MC_MIRROR` / `AWS_MIRROR` 指过去，注意这两个是**前缀**，脚本会在后面拼 `/linux-amd64/mc`、`/awscli-exe-linux-x86_64.zip`。
+
+两个实现细节：
+
+- **JMeter 的 `.sha512` 仍从 `archive.apache.org` 取**。国内 Apache 镜像只镜像主产物，`.sha512` 是 404。所以 87MB 的包走国内镜像、150 字节的校验文件走官方，校验没丢。
+- 每个源都带官方回退，国内镜像挂了会自动落到 `dlcdn`/`archive`/`repo1`，不会直接 build 失败。
 
 ## 用 JMeter 压测
 

@@ -3,13 +3,17 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # 全部留空 = 用 Dockerfile 里的默认值（已经是国内镜像）。
+      # 想换回官方源就设成官方地址，例如 APT_MIRROR=deb.debian.org
       args:
-        # 全部留空即用 Dockerfile 里的默认值；国内构建可设成
-        # PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
-        # DEBIAN_MIRROR=mirrors.tuna.tsinghua.edu.cn
+        APT_MIRROR: ${APT_MIRROR:-}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-}
-        DEBIAN_MIRROR: ${DEBIAN_MIRROR:-}
+        JMETER_MIRROR: ${JMETER_MIRROR:-}
+        MAVEN_MIRROR: ${MAVEN_MIRROR:-}
+        MC_MIRROR: ${MC_MIRROR:-}
+        AWS_MIRROR: ${AWS_MIRROR:-}
         JMETER_VERSION: ${JMETER_VERSION:-}
+        JMETER_PLUGINS_MANAGER: ${JMETER_PLUGINS_MANAGER:-}
     image: pytools:3.12
     container_name: pytools
     # 本机默认 arm64；服务器上：TARGET_PLATFORM=linux/amd64 docker compose build
