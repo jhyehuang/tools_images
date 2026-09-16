@@ -3,20 +3,26 @@
 # 服务器上出 x86 镜像只需 docker build --platform linux/amd64 ...
 FROM  python:3.12-slim-bookworm
 
-# 下载全部默认走国内镜像（apt 阿里云 / pip 清华 / JMeter 清华 / maven 阿里云）。
-# 每个源都能单独覆盖回官方地址，出国构建时用：
+# 下载默认全部走国内源：
+#   apt      mirrors.aliyun.com（阿里云 ECS 上自动切内网源 mirrors.cloud.aliyuncs.com）
+#   pip      pypi.tuna.tsinghua.edu.cn
+#   JMeter   mirrors.tuna.tsinghua.edu.cn/apache
+#   maven    maven.aliyun.com/repository/public
+#   mc       dl.minio.org.cn
+#   awscli   awscli.amazonaws.com（没有公开国内镜像）
+# 每个源都能单独覆盖，出国构建时传官方地址即可：
 #   --build-arg APT_MIRROR=deb.debian.org
 #   --build-arg PIP_INDEX_URL=https://pypi.org/simple
 #   --build-arg JMETER_MIRROR=https://dlcdn.apache.org/jmeter/binaries
 #   --build-arg MAVEN_MIRROR=https://repo1.maven.org/maven2
-# 注意：显式传空值会覆盖默认值，所以下面这些都在 RUN 里做了兜底，空 = 用默认。
+#   --build-arg MC_MIRROR=https://dl.min.io/client/mc/release
+# 显式传空值会覆盖默认值，所以每个源在 RUN 里都做了兜底，空 = 用默认。
 ARG APT_MIRROR=
 ARG PIP_INDEX_URL=
 ARG JMETER_MIRROR=
 ARG MAVEN_MIRROR=
-# mc / awscli 没有公开的国内镜像，默认走官方；
-# 公司内网有 Nexus/Artifactory 代理的话可以用这两个指过去。
 ARG MC_MIRROR=
+# awscli 没有公开的国内镜像；公司内网有 Nexus/Artifactory 代理的话可以用它指过去。
 ARG AWS_MIRROR=
 ARG JMETER_VERSION=
 ARG JMETER_PLUGINS_MANAGER=
@@ -32,12 +38,30 @@ ENV DEBIAN_FRONTEND=noninteractive \
 WORKDIR /work
 
 # ---------- 系统工具 ----------
+# 为什么用 $mirror 而不是 $APT_MIRROR：同名的话，Docker 会在把命令交给 shell 之前
+# 就按 ARG 的值（空）替换掉 $APT_MIRROR，sed 会变成 `s|deb.debian.org||g` 把源清空。
+# 换个 shell 变量名就不会被 Docker 碰，由 shell 自己展开。下面的 MC_BASE / AWS_BASE 同理。
 RUN set -eux; \
-    APT_MIRROR="${APT_MIRROR:-mirrors.aliyun.com}"; \
-    echo ">>> apt 源: $APT_MIRROR"; \
+    if [ -n "${APT_MIRROR:-}" ]; then \
+        mirror="$APT_MIRROR"; \
+    elif curl -fsI --max-time 3 http://mirrors.cloud.aliyuncs.com/debian/dists/bookworm/Release >/dev/null 2>&1; then \
+        mirror=mirrors.cloud.aliyuncs.com; \
+    else \
+        mirror=mirrors.aliyun.com; \
+    fi; \
+    echo ">>> apt 源: $mirror"; \
     for f in /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list; do \
-        if [ -f "$f" ]; then sed -i "s|deb.debian.org|$APT_MIRROR|g" "$f"; fi; \
+        if [ -f "$f" ]; then sed -i "s|deb.debian.org|$mirror|g" "$f"; fi; \
     done; \
+    ok=0; \
+    for f in /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list; do \
+        if [ -f "$f" ] && grep -qF "$mirror" "$f"; then ok=1; fi; \
+    done; \
+    if [ "$ok" -ne 1 ]; then \
+        echo "!! apt 源没换成 ${mirror}，实际内容如下：" >&2; \
+        cat /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list >&2 2>/dev/null || true; \
+        exit 1; \
+    fi; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         bash bash-completion ca-certificates curl wget \
@@ -57,13 +81,17 @@ RUN set -eux; \
     "$JAVA_HOME/bin/java" -version
 
 # ---------- MinIO mc ----------
+# 注意：老地址 dl.min.io/client/mc/release/... 已废弃（410 Gone），
+# 现在用官方中国 CDN dl.minio.org.cn。内网代理用 MC_MIRROR 覆盖。
 RUN set -eux; \
     case "$(uname -m)" in \
         x86_64)  MC_ARCH=amd64 ;; \
         aarch64) MC_ARCH=arm64 ;; \
         *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;; \
     esac; \
-    curl -fsSL "${MC_MIRROR:-https://dl.min.io/client/mc/release}/linux-${MC_ARCH}/mc" -o /usr/local/bin/mc; \
+    MC_BASE="${MC_MIRROR:-https://dl.minio.org.cn/client/mc/release}"; \
+    echo ">>> mc 源: $MC_BASE"; \
+    curl -fsSL "$MC_BASE/linux-${MC_ARCH}/mc" -o /usr/local/bin/mc; \
     chmod +x /usr/local/bin/mc
 
 # ---------- AWS CLI v2 ----------
@@ -73,7 +101,9 @@ RUN set -eux; \
         aarch64) AWS_ARCH=aarch64 ;; \
         *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;; \
     esac; \
-    curl -fsSL "${AWS_MIRROR:-https://awscli.amazonaws.com}/awscli-exe-linux-${AWS_ARCH}.zip" -o /tmp/awscliv2.zip; \
+    AWS_BASE="${AWS_MIRROR:-https://awscli.amazonaws.com}"; \
+    echo ">>> awscli 源: $AWS_BASE"; \
+    curl -fsSL "$AWS_BASE/awscli-exe-linux-${AWS_ARCH}.zip" -o /tmp/awscliv2.zip; \
     unzip -q /tmp/awscliv2.zip -d /tmp; \
     /tmp/aws/install; \
     rm -rf /tmp/awscliv2.zip /tmp/aws

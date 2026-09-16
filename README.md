@@ -83,11 +83,11 @@ gunzip -c pytools-3.12-amd64.tar.gz | docker load
 
 | 内容 | 默认源 |
 | --- | --- |
-| apt 包 | `mirrors.aliyun.com` |
+| apt 包 | `mirrors.aliyun.com`；在阿里云 ECS 上自动切内网源 `mirrors.cloud.aliyuncs.com` |
 | pip 包 | `pypi.tuna.tsinghua.edu.cn` |
 | JMeter tgz (87MB) | `mirrors.tuna.tsinghua.edu.cn/apache` |
 | maven jar | `maven.aliyun.com/repository/public` |
-| mc | `dl.min.io`（无公开国内镜像） |
+| mc | `dl.minio.org.cn`（官方中国 CDN） |
 | awscli | `awscli.amazonaws.com`（无公开国内镜像） |
 
 不用额外设置，直接 `./build.sh` 就是快的。要换回官方源（比如在国外构建）：
@@ -100,17 +100,13 @@ MAVEN_MIRROR=https://repo1.maven.org/maven2 \
 ./build.sh
 ```
 
-`mc` 和 `awscli` 没有公开的国内镜像。如果公司内网有 Nexus/Artifactory 代理，用 `MC_MIRROR` / `AWS_MIRROR` 指过去，注意这两个是**前缀**，脚本会在后面拼 `/linux-amd64/mc`、`awscli-exe-linux-x86_64.zip`。
+`awscli.amazonaws.com` 没有公开的国内镜像。如果公司内网有 Nexus/Artifactory 代理，用 `AWS_MIRROR` 指过去，注意它是**前缀**，脚本会在后面拼 `/awscli-exe-linux-x86_64.zip`。
 
-**阿里云 ECS 上**可以再快一档：把 apt 换成内网源，走的是内网、不占公网带宽。
+`mc` 老地址 `dl.min.io/client/mc/release/...` 已经废弃（410 Gone），现在默认走官方的中国 CDN `dl.minio.org.cn`。
 
-```bash
-APT_MIRROR=mirrors.cloud.aliyuncs.com ./build.sh
-```
+**阿里云 ECS 上** apt 会自动切到内网源 `mirrors.cloud.aliyuncs.com`（构建时探测 3 秒，能通就用）。内网源不占公网带宽，ECS 那种 1-5 Mbps 公网带宽的机器差别很大。想强制指定就传 `APT_MIRROR`。
 
-`mirrors.cloud.aliyuncs.com` 只在阿里云内网可达，ECS 外面解析不到，所以没做成默认值。
-
-排查构建慢在哪：每个下载步骤都会先 echo 出实际用的源，`>>> apt 源: ...`、`>>> pip 源: ...`、`>>> JMeter tgz 来自 ...`。日志里看到 `deb.debian.org` 就说明跑的是旧版 Dockerfile。
+排查构建慢在哪：每个下载步骤都会 echo 出实际用的源 —— `>>> apt 源: ...`、`>>> pip 源: ...`、`>>> mc 源: ...`、`>>> JMeter tgz 来自 ...`。apt 那步还会在换源失败时直接报错并打印源文件内容，不会闷声慢下去。
 
 两个实现细节：
 
