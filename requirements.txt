@@ -1,0 +1,10 @@
+# 按需增删；改完重新 build 即可
+requests
+boto3
+minio
+pyyaml
+python-dateutil
+tabulate
+tqdm
+pandas
+openpyxl

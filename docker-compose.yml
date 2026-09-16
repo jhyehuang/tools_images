@@ -1,0 +1,26 @@
+services:
+  pytools:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # 全部留空即用 Dockerfile 里的默认值；国内构建可设成
+        # PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+        # DEBIAN_MIRROR=mirrors.tuna.tsinghua.edu.cn
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+        DEBIAN_MIRROR: ${DEBIAN_MIRROR:-}
+        JMETER_VERSION: ${JMETER_VERSION:-}
+    image: pytools:3.12
+    container_name: pytools
+    # 本机默认 arm64；服务器上：TARGET_PLATFORM=linux/amd64 docker compose build
+    platform: ${TARGET_PLATFORM:-linux/arm64}
+    working_dir: /work
+    volumes:
+      # 宿主目录 → 容器 /data，用 HOST_DATA_DIR 覆盖
+      - ${HOST_DATA_DIR:-./data}:/data
+    environment:
+      TZ: Asia/Shanghai
+      DATA_DIR: /data
+    tty: true
+    stdin_open: true
+    command: ["bash"]
