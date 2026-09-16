@@ -34,6 +34,7 @@ WORKDIR /work
 # ---------- 系统工具 ----------
 RUN set -eux; \
     APT_MIRROR="${APT_MIRROR:-mirrors.aliyun.com}"; \
+    echo ">>> apt 源: $APT_MIRROR"; \
     for f in /etc/apt/sources.list.d/debian.sources /etc/apt/sources.list; do \
         if [ -f "$f" ]; then sed -i "s|deb.debian.org|$APT_MIRROR|g" "$f"; fi; \
     done; \
@@ -129,6 +130,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     else \
         PIP_OPTS="-i https://pypi.tuna.tsinghua.edu.cn/simple"; \
     fi; \
+    echo ">>> pip 源: $PIP_OPTS"; \
     pip install $PIP_OPTS -r /tmp/requirements.txt
 
 # ---------- 版本自检（构建时失败好过运行时才发现） ----------

@@ -100,7 +100,17 @@ MAVEN_MIRROR=https://repo1.maven.org/maven2 \
 ./build.sh
 ```
 
-`mc` 和 `awscli` 没有公开的国内镜像。如果公司内网有 Nexus/Artifactory 代理，用 `MC_MIRROR` / `AWS_MIRROR` 指过去，注意这两个是**前缀**，脚本会在后面拼 `/linux-amd64/mc`、`/awscli-exe-linux-x86_64.zip`。
+`mc` 和 `awscli` 没有公开的国内镜像。如果公司内网有 Nexus/Artifactory 代理，用 `MC_MIRROR` / `AWS_MIRROR` 指过去，注意这两个是**前缀**，脚本会在后面拼 `/linux-amd64/mc`、`awscli-exe-linux-x86_64.zip`。
+
+**阿里云 ECS 上**可以再快一档：把 apt 换成内网源，走的是内网、不占公网带宽。
+
+```bash
+APT_MIRROR=mirrors.cloud.aliyuncs.com ./build.sh
+```
+
+`mirrors.cloud.aliyuncs.com` 只在阿里云内网可达，ECS 外面解析不到，所以没做成默认值。
+
+排查构建慢在哪：每个下载步骤都会先 echo 出实际用的源，`>>> apt 源: ...`、`>>> pip 源: ...`、`>>> JMeter tgz 来自 ...`。日志里看到 `deb.debian.org` 就说明跑的是旧版 Dockerfile。
 
 两个实现细节：
 
